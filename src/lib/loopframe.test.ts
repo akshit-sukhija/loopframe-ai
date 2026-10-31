@@ -146,3 +146,18 @@ test('Seeded demo state initializes 15 segments, 3 candidates, pending feedback,
   assert.equal(seed.projects[0].candidates.length, 3);
   assert.equal(seed.evaluationCases.length, 24);
 });
+
+
+test('parseTimestampedTranscript preserves explicitly supplied segment end timestamps', () => {
+  const raw = `[00:00:05 - 00:00:12] Host: A segment with an explicit end.
+[00:00:18] Host: The following segment begins later.
+[00:00:24 - 00:00:31] Host: Final segment also has an explicit end.`;
+
+  const result = parseTimestampedTranscript(raw);
+  assert.equal(result.valid, true);
+  assert.equal(result.segments[0].start_ms, 5000);
+  assert.equal(result.segments[0].end_ms, 12000);
+  assert.equal(result.segments[1].start_ms, 18000);
+  assert.equal(result.segments[1].end_ms, 24000);
+  assert.equal(result.segments[2].end_ms, 31000);
+});
