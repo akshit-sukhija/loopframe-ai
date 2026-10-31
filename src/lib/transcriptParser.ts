@@ -63,6 +63,7 @@ export function parseTimestampedTranscript(rawTranscript: string): TranscriptPar
   const lines = rawTranscript.split(/\r?\n/);
   const segments: TranscriptSegment[] = [];
   const errors: TranscriptValidationLineError[] = [];
+  const explicitEndSegmentIds = new Set<string>();
 
   let lastStartMs = -1;
   let orderIndex = 0;
@@ -167,6 +168,8 @@ export function parseTimestampedTranscript(rawTranscript: string): TranscriptPar
     orderIndex += 1;
     const segmentId = `seg-${String(orderIndex).padStart(2, '0')}`;
 
+    if (explicitEndMs !== null) explicitEndSegmentIds.add(segmentId);
+
     segments.push({
       segment_id: segmentId,
       start_ms: startMs,
@@ -183,9 +186,9 @@ export function parseTimestampedTranscript(rawTranscript: string): TranscriptPar
   for (let i = 0; i < segments.length; i++) {
     const current = segments[i];
     const next = segments[i + 1];
-    if (next && next.start_ms > current.start_ms) {
+    if (next && !explicitEndSegmentIds.has(current.segment_id) && next.start_ms > current.start_ms) {
       current.end_ms = next.start_ms;
-    } else if (!next) {
+    } else if (!next && !explicitEndSegmentIds.has(current.segment_id)) {
       // Estimate based on word count (~2.5 words/sec, min 6s, max 25s)
       const wordCount = current.text.split(/\s+/).filter(Boolean).length;
       const estimatedDurationMs = Math.max(6000, Math.min(25000, Math.round((wordCount / 2.5) * 1000)));
