@@ -938,6 +938,12 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
             variant: 'success',
           });
         }
+      } catch (err: unknown) {
+        addToast({
+          title: 'Regeneration failed',
+          description: err instanceof Error ? err.message : 'Could not regenerate this candidate.',
+          variant: 'error',
+        });
       } finally {
         setIsGenerating(false);
       }
