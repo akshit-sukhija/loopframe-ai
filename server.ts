@@ -737,15 +737,13 @@ Requirements:
 
     if (!newHook) {
       generationSource = 'DEMO FALLBACK';
-      // Deterministic rule-aware regeneration for the sample candidates or custom transcripts
-      const topicRule = activeRules.find(
-        (r) => r.rule_type === 'INCLUDE_CLEAR_TOPIC'
+      // Deterministic fallback for the sample candidates or custom transcripts.
+      // Platform-scoped preferences must never leak into the other platform's copy.
+      const instagramRules = activeRules.filter(
+        (rule) => rule.scope !== 'platform' || rule.scope_reference === 'instagram_reels'
       );
-      const qualRule = activeRules.find(
-        (r) => r.rule_type === 'PRESERVE_QUALIFICATIONS'
-      );
-      const conciseRule = activeRules.find(
-        (r) => r.rule_type === 'PREFER_CONCISE_HOOKS'
+      const youtubeRules = activeRules.filter(
+        (rule) => rule.scope !== 'platform' || rule.scope_reference === 'youtube_shorts'
       );
 
       if (candidate.candidate_id === 'cand-sample-01') {
@@ -777,7 +775,6 @@ Requirements:
           'Dr. Elena Rostova breaks down how self-explanation stalls act as diagnostic signals during deliberate practice.';
       } else {
         // For user transcripts, never substitute unrelated sample copy.
-        // The fallback stays close to the selected source excerpt and is labelled DEMO FALLBACK.
         const sourceLead = sourceExcerpt.split(/[.!?]/)[0]?.trim() || sourceExcerpt.trim();
         const safeLead = sourceLead.length > 100
           ? `${sourceLead.slice(0, 97).trimEnd()}…`
@@ -788,24 +785,23 @@ Requirements:
         newYtCaption = sourceExcerpt;
       }
 
-      // A required topic phrase is added only when it is grounded in the source excerpt.
-      if (topicRule?.rule_parameters.requiredTopicPhrase) {
-        const phrase = topicRule.rule_parameters.requiredTopicPhrase;
-        if (
-          sourceExcerpt.toLowerCase().includes(phrase.toLowerCase()) &&
-          !newHook.toLowerCase().includes(phrase.toLowerCase())
-        ) {
-          newHook = `${phrase}: ${newHook}`;
+      const applyFallbackRules = (hook: string, rules: PreferenceRule[]) => {
+        let output = hook;
+        const topicRule = rules.find((rule) => rule.rule_type === 'INCLUDE_CLEAR_TOPIC');
+        const phrase = topicRule?.rule_parameters.requiredTopicPhrase ?? '';
+        if (phrase && sourceExcerpt.toLowerCase().includes(phrase.toLowerCase()) && !output.toLowerCase().includes(phrase.toLowerCase())) {
+          output = `${phrase}: ${output}`;
         }
-      }
-
-      if (conciseRule?.rule_parameters.maxWords) {
-        const maxW = conciseRule.rule_parameters.maxWords;
-        const words = newHook.split(/\s+/).filter(Boolean);
-        if (words.length > maxW) {
-          newHook = words.slice(0, maxW).join(' ');
+        const conciseRule = rules.find((rule) => rule.rule_type === 'PREFER_CONCISE_HOOKS');
+        const maxWords = conciseRule?.rule_parameters.maxWords;
+        if (maxWords) {
+          const words = output.trim().split(' ').filter(Boolean);
+          if (words.length > maxWords) output = words.slice(0, maxWords).join(' ');
         }
-      }
+        return output;
+      };
+      newHook = applyFallbackRules(newHook, instagramRules);
+      newYtHook = applyFallbackRules(newYtHook, youtubeRules);
     }
 
     const ruleTests = evaluateAllRulesForOutput({
