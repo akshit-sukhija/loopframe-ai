@@ -596,10 +596,17 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
             )
           : [confirmedRule, ...prev.preferences];
 
-        const activeRules = getApplicableActiveRules(
+        const instagramRules = getApplicableActiveRules(
           nextPreferences,
-          params.projectId
+          params.projectId,
+          'instagram_reels'
         );
+        const youtubeRules = getApplicableActiveRules(
+          nextPreferences,
+          params.projectId,
+          'youtube_shorts'
+        );
+        const allRuleIds = [...new Set([...instagramRules, ...youtubeRules].map((r) => r.rule_id))];
 
         const nextState: LoopframeStoreState = {
           ...prev,
@@ -619,16 +626,33 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
                       : fe
                   ),
                   candidates: p.candidates.map((c) => {
-                    const updatedTests = evaluateAllRulesForOutput({
-                      rules: activeRules,
-                      hook: c.suggested_hook,
+                    const instagramTests = evaluateAllRulesForOutput({
+                      rules: instagramRules,
+                      hook: c.platform_copy.instagram_reels.hook,
                       caption: c.platform_copy.instagram_reels.caption,
+                      sourceExcerpt: c.source_excerpt,
+                    });
+                    const youtubeTests = evaluateAllRulesForOutput({
+                      rules: youtubeRules,
+                      hook: c.platform_copy.youtube_shorts.hook,
+                      caption: c.platform_copy.youtube_shorts.caption,
                       sourceExcerpt: c.source_excerpt,
                     });
                     return {
                       ...c,
-                      active_rules_applied: activeRules.map((r) => r.rule_id),
-                      rule_test_results: updatedTests,
+                      active_rules_applied: allRuleIds,
+                      rule_test_results: instagramTests,
+                      platform_copy: {
+                        ...c.platform_copy,
+                        instagram_reels: {
+                          ...c.platform_copy.instagram_reels,
+                          rule_tests: instagramTests,
+                        },
+                        youtube_shorts: {
+                          ...c.platform_copy.youtube_shorts,
+                          rule_tests: youtubeTests,
+                        },
+                      },
                     };
                   }),
                 }
