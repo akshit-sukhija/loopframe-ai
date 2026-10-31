@@ -147,7 +147,6 @@ function buildDeterministicFallbackCandidates(params: {
     };
     const igHook = buildFallbackHook(instagramRules);
     const ytHook = buildFallbackHook(youtubeRules);
-    const hook = igHook;
 
     const igCaption = `${asm.sourceExcerpt.slice(0, 220)}${
       asm.sourceExcerpt.length > 220 ? '...' : ''
