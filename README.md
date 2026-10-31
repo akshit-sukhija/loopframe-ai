@@ -23,6 +23,12 @@ npm run build    # Builds production frontend bundle
 - **Backend (`server.ts`):** Node/Express server hosting `/api/parse-transcript`, `/api/generate-candidates`, `/api/parse-feedback`, and `/api/regenerate-candidate` using `@google/genai` (`gemini-3.8-flash`) with structured JSON schema validation, 1-retry correction loop, and clearly labelled deterministic fallback (`DEMO FALLBACK`).
 - **Persistence Adapter:** Isolated local storage adapter (`loopframe_v4_store_v1`) labelled honestly as a **Single-User Local Demo Store**. Persists projects, immutable transcript segments, candidates, creator feedback events, confirmed preference rules, approved library items, and audit events across browser refreshes.
 
+### Voice input with Wispr Flow
+- On desktop, focus the transcript field in **Projects → New Project**, then use Wispr Flow's system-wide dictation shortcut. The completed dictation is inserted into the focused field; LOOPFRAME does not embed Wispr Flow or capture microphone audio itself.
+- The New Project screen includes a Wispr Flow quick-start panel, Windows/macOS shortcut reference, a field-focus action, and a link to the official setup guide.
+- LOOPFRAME's transcript parser still requires one explicit timestamp at the start of every non-empty line (for example: `[00:00:05] Host: Welcome back`). Wispr Flow does not generate source-video timecodes. Dictate or add the timecodes yourself, then review the punctuation and validation results before creating the project.
+- This is desktop text dictation into an existing input, not automatic audio-file transcription. Browser microphone recording and automatic timecode alignment are not implemented.
+
 ---
 
 ## 3. Environment Variables
@@ -50,10 +56,12 @@ Defined in `.env.example`:
 - Verbatim source excerpt assembly and timestamp/duration derivation in code from immutable segment IDs.
 - 7 deterministic context integrity checks separated from 4 clearly-labelled AI advisory checks.
 - Closed 10-rule P0 taxonomy (`AVOID_EXAGGERATED_HOOKS`, `AVOID_CLICKBAIT`, `PRESERVE_QUALIFICATIONS`, `PRESERVE_EDUCATIONAL_CONTEXT`, `AVOID_UNSUPPORTED_CLAIMS`, `PREFER_CONCISE_HOOKS`, `PREFER_CONVERSATIONAL_TONE`, `AVOID_JARGON`, `INCLUDE_CLEAR_TOPIC`, `CUSTOM_REVIEW_REQUIRED`).
-- Deterministic post-generation rule verification engine (`Pass`, `Fail` with matched phrase, or `Advisory`) and 24-case evaluation suite.
+- Deterministic post-generation rule verification engine (`Pass`, `Fail` with matched phrase, or `Advisory`), plus 24 seeded evaluation fixtures. The fixtures are not currently executed as a complete automated evaluation suite.
 - Server-side Gemini API integration (`gemini-3.8-flash`) with schema validation, retry, and labelled `DEMO FALLBACK`.
 
 ### Simulated / Known Limitations in P0
 - Persistence uses a single-user local browser store adapter (`loopframe_v4_store_v1`) rather than multi-user cloud authentication.
 - Heuristic lexicon and word-count checks are deterministic rules, not full natural-language entailment verifiers; semantic rules (`PRESERVE_EDUCATIONAL_CONTEXT`, `PREFER_CONVERSATIONAL_TONE`) are honestly marked `AI Advisory Only`.
+- Candidate-generation fallback groups transcript segments into fixed windows; it does not provide semantic clip selection. Treat `DEMO FALLBACK` as a non-production demonstration path.
+- The Express API routes do not implement application-level authentication or rate limiting. Do not expose the service publicly with a billable Gemini key until a proper authentication, authorization, and abuse-control layer is added.
 - Video/audio file upload, speech-to-text transcription, video clip rendering, social auto-publishing, calendars, and performance analytics are out of scope for P0 and belong to the P1/P2 roadmap.

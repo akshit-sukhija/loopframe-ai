@@ -11,6 +11,7 @@ import {
   runDeterministicRuleTest,
 } from './ruleEngine';
 import { buildInitialSeedState, SAMPLE_TRANSCRIPT_RAW } from './seedData';
+import type { PreferenceRule } from '../types/loopframe';
 
 test('parseTimestampedTranscript parses valid lines and preserves verbatim text without inventing speaker labels', () => {
   const raw = `[00:00:05] Speaker A: First segment text here.
@@ -145,4 +146,55 @@ test('Seeded demo state initializes 15 segments, 3 candidates, pending feedback,
   assert.equal(seed.projects[0].segments.length, 15);
   assert.equal(seed.projects[0].candidates.length, 3);
   assert.equal(seed.evaluationCases.length, 24);
+});
+
+
+test('parseTimestampedTranscript preserves explicitly supplied segment end timestamps', () => {
+  const raw = `[00:00:05 - 00:00:12] Host: A segment with an explicit end.
+[00:00:18] Host: The following segment begins later.
+[00:00:24 - 00:00:31] Host: Final segment also has an explicit end.`;
+
+  const result = parseTimestampedTranscript(raw);
+  assert.equal(result.valid, true);
+  assert.equal(result.segments[0].start_ms, 5000);
+  assert.equal(result.segments[0].end_ms, 12000);
+  assert.equal(result.segments[1].start_ms, 18000);
+  assert.equal(result.segments[1].end_ms, 24000);
+  assert.equal(result.segments[2].end_ms, 31000);
+});
+
+
+test('PRESERVE_QUALIFICATIONS requires source markers to be retained, not merely any generic word', () => {
+  const rule: PreferenceRule = {
+    rule_id: 'rule-qualification-test',
+    rule_type: 'PRESERVE_QUALIFICATIONS',
+    human_readable_description: 'Preserve source qualifications.',
+    scope: 'global',
+    scope_reference: 'all',
+    source_feedback_id: 'fb-qualification-test',
+    source_feedback_text: 'Preserve conditions and caveats.',
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    status: 'active',
+    confirmed_by_user: true,
+    rule_parameters: { requiredQualifications: ['only if', 'foundational'] },
+  };
+  const source = 'This method works only if learners first build foundational vocabulary.';
+
+  const omitted = runDeterministicRuleTest({
+    rule,
+    hook: 'Build foundational vocabulary to use this method.',
+    caption: 'Start with the core concepts.',
+    sourceExcerpt: source,
+  });
+  assert.equal(omitted.outcome, 'Fail');
+  assert.match(omitted.matched_phrase_or_reason, /only if/i);
+
+  const retained = runDeterministicRuleTest({
+    rule,
+    hook: 'This method works only if you build foundational vocabulary.',
+    caption: 'Start with the core concepts.',
+    sourceExcerpt: source,
+  });
+  assert.equal(retained.outcome, 'Pass');
 });

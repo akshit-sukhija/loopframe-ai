@@ -53,8 +53,10 @@ function buildDeterministicFallbackCandidates(params: {
   projectId: string;
   segments: TranscriptSegment[];
   activeRules: PreferenceRule[];
+  instagramRules: PreferenceRule[];
+  youtubeRules: PreferenceRule[];
 }): ClipCandidate[] {
-  const { projectId, segments, activeRules } = params;
+  const { projectId, segments, activeRules, instagramRules, youtubeRules } = params;
   const total = segments.length;
   if (total === 0) return [];
 
@@ -105,16 +107,10 @@ function buildDeterministicFallbackCandidates(params: {
     }
   }
 
-  const hasAvoidExaggerated = activeRules.some(
-    (r) => r.rule_type === 'AVOID_EXAGGERATED_HOOKS'
-  );
-  const maxWordsRule = activeRules.find(
-    (r) => r.rule_type === 'PREFER_CONCISE_HOOKS'
-  );
-  const topicRule = activeRules.find(
-    (r) => r.rule_type === 'INCLUDE_CLEAR_TOPIC'
-  );
-  const topicPhrase = topicRule?.rule_parameters.requiredTopicPhrase ?? '';
+  if (ranges.length === 0 && total > 0) {
+    ranges.push([0, total - 1, 'Full Transcript Review', 'Full Transcript']);
+  }
+
 
   return ranges.map(([sIdx, eIdx, defaultTitle, cType], index) => {
     const startSeg = segments[sIdx];
@@ -128,23 +124,29 @@ function buildDeterministicFallbackCandidates(params: {
     const firstSentence =
       startSeg.text.split(/[.?!]/)[0]?.trim() || startSeg.text.slice(0, 80);
 
-    let hook = hasAvoidExaggerated
-      ? `How ${firstSentence.slice(0, 65)}`
-      : index === 0
-      ? `Why Standard Approaches Fail: ${firstSentence.slice(0, 55)}`
-      : `Key Mechanism: ${firstSentence.slice(0, 62)}`;
-
-    if (topicPhrase && !hook.toLowerCase().includes(topicPhrase.toLowerCase())) {
-      hook = `${topicPhrase}: ${hook}`;
-    }
-
-    if (maxWordsRule?.rule_parameters.maxWords) {
-      const limit = maxWordsRule.rule_parameters.maxWords;
-      const words = hook.split(/\s+/).filter(Boolean);
-      if (words.length > limit) {
-        hook = words.slice(0, limit).join(' ');
+    const buildFallbackHook = (rules: PreferenceRule[]) => {
+      const avoidsExaggeration = rules.some((r) => r.rule_type === 'AVOID_EXAGGERATED_HOOKS');
+      const maxWordsRule = rules.find((r) => r.rule_type === 'PREFER_CONCISE_HOOKS');
+      const topicRule = rules.find((r) => r.rule_type === 'INCLUDE_CLEAR_TOPIC');
+      let result = avoidsExaggeration
+        ? `How ${firstSentence.slice(0, 65)}`
+        : index === 0
+          ? `Why Standard Approaches Fail: ${firstSentence.slice(0, 55)}`
+          : `Key Mechanism: ${firstSentence.slice(0, 62)}`;
+      const topicPhrase = topicRule?.rule_parameters.requiredTopicPhrase ?? '';
+      if (topicPhrase && asm.sourceExcerpt.toLowerCase().includes(topicPhrase.toLowerCase()) && !result.toLowerCase().includes(topicPhrase.toLowerCase())) {
+        result = `${topicPhrase}: ${result}`;
       }
-    }
+      if (maxWordsRule?.rule_parameters.maxWords) {
+        const words = result.trim().split(' ').filter(Boolean);
+        if (words.length > maxWordsRule.rule_parameters.maxWords) {
+          result = words.slice(0, maxWordsRule.rule_parameters.maxWords).join(' ');
+        }
+      }
+      return result;
+    };
+    const igHook = buildFallbackHook(instagramRules);
+    const ytHook = buildFallbackHook(youtubeRules);
 
     const igCaption = `${asm.sourceExcerpt.slice(0, 220)}${
       asm.sourceExcerpt.length > 220 ? '...' : ''
@@ -158,20 +160,20 @@ function buildDeterministicFallbackCandidates(params: {
       startSegmentId: startSeg.segment_id,
       endSegmentId: endSeg.segment_id,
       assembledExcerpt: asm.sourceExcerpt,
-      suggestedHook: hook,
+      suggestedHook: igHook,
       captionText: igCaption,
     });
 
     const igRules = evaluateAllRulesForOutput({
-      rules: activeRules,
-      hook,
+      rules: instagramRules,
+      hook: igHook,
       caption: igCaption,
       sourceExcerpt: asm.sourceExcerpt,
     });
 
     const ytRules = evaluateAllRulesForOutput({
-      rules: activeRules,
-      hook,
+      rules: youtubeRules,
+      hook: ytHook,
       caption: ytCaption,
       sourceExcerpt: asm.sourceExcerpt,
     });
@@ -188,12 +190,12 @@ function buildDeterministicFallbackCandidates(params: {
       end_ms: asm.endMs,
       duration_sec: asm.durationSec,
       reason: `Selected segments ${startSeg.segment_id}–${endSeg.segment_id} covering a complete thematic unit from the transcript.`,
-      suggested_hook: hook,
+      suggested_hook: igHook,
       platform_targets: ['instagram_reels', 'youtube_shorts'],
       platform_copy: {
         instagram_reels: {
           destination: 'instagram_reels',
-          hook,
+          hook: igHook,
           caption: igCaption,
           cta: 'Share your thoughts on this breakdown below.',
           hashtags: ['#CreatorStudio', '#DeepWork', '#Education'],
@@ -202,7 +204,7 @@ function buildDeterministicFallbackCandidates(params: {
         },
         youtube_shorts: {
           destination: 'youtube_shorts',
-          hook,
+          hook: ytHook,
           caption: ytCaption,
           cta: 'Watch the full session for all context.',
           hashtags: ['#Shorts', '#Explainer', '#Learning'],
@@ -267,7 +269,11 @@ async function startServer() {
       return;
     }
 
-    const activeRules = getApplicableActiveRules(preferences, projectId);
+    const instagramRules = getApplicableActiveRules(preferences, projectId, 'instagram_reels');
+    const youtubeRules = getApplicableActiveRules(preferences, projectId, 'youtube_shorts');
+    const activeRuleMap = new Map<string, PreferenceRule>();
+    [...instagramRules, ...youtubeRules].forEach((rule) => activeRuleMap.set(rule.rule_id, rule));
+    const activeRules = [...activeRuleMap.values()];
     const ai = getGenAIClient();
 
     if (!ai) {
@@ -275,6 +281,8 @@ async function startServer() {
         projectId,
         segments,
         activeRules,
+        instagramRules,
+        youtubeRules,
       });
       res.json({
         candidates: fallbackCandidates,
@@ -285,17 +293,19 @@ async function startServer() {
       return;
     }
 
-    const rulesPrompt =
-      activeRules.length > 0
-        ? `ACTIVE CONFIRMED CREATOR RULES (MUST OBEY):\n${activeRules
+    const lineBreak = String.fromCharCode(10);
+    const formatRules = (rules: PreferenceRule[]) =>
+      rules.length > 0
+        ? rules
             .map(
               (r, i) =>
-                `${i + 1}. [${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(
-                  r.rule_parameters
-                )})`
+                `${i + 1}. [${r.scope}:${r.scope_reference} | ${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(r.rule_parameters)})`
             )
-            .join('\n')}`
-        : 'No custom creator rules active yet.';
+            .join(lineBreak)
+        : 'No custom creator rules active for this platform.';
+    const rulesPrompt =
+      'INSTAGRAM REELS RULES (MUST OBEY):' + lineBreak + formatRules(instagramRules) +
+      lineBreak + lineBreak + 'YOUTUBE SHORTS RULES (MUST OBEY):' + lineBreak + formatRules(youtubeRules);
 
     const transcriptListing = segments
       .map(
@@ -316,7 +326,7 @@ CRITICAL CONSTRAINTS:
     }).
 2. start_segment_id MUST come before or equal to end_segment_id.
 3. Do NOT invent timestamps or rewrite the source transcript—our server builds the exact quote from your selected segment IDs.
-4. Provide distinct copy for instagram_reels (concise, conversational) and youtube_shorts (clear topic framing and searchable caption).
+4. Provide distinct copy for instagram_reels (concise, conversational) and youtube_shorts (clear topic framing and searchable caption). Apply each platform-scoped rule ONLY to its named platform; global/project rules apply to both.
 5. ${rulesPrompt}
 ${
   creatorProfile?.preferredTone
@@ -407,14 +417,14 @@ ${transcriptListing}
         });
 
         const igRuleTests = evaluateAllRulesForOutput({
-          rules: activeRules,
+          rules: instagramRules,
           hook,
           caption: igCap,
           sourceExcerpt: asm.sourceExcerpt,
         });
 
         const ytRuleTests = evaluateAllRulesForOutput({
-          rules: activeRules,
+          rules: youtubeRules,
           hook: ytHook,
           caption: ytCap,
           sourceExcerpt: asm.sourceExcerpt,
@@ -498,6 +508,8 @@ ${transcriptListing}
           projectId,
           segments,
           activeRules,
+          instagramRules,
+          youtubeRules,
         });
         res.json({
           candidates: fallbackCandidates,
@@ -626,6 +638,12 @@ Creator feedback text: "${freeText}"`,
     );
     const sourceExcerpt = asm.valid ? asm.sourceExcerpt : candidate.source_excerpt;
 
+    const instagramRules = activeRules.filter(
+      (rule) => rule.scope !== 'platform' || rule.scope_reference === 'instagram_reels'
+    );
+    const youtubeRules = activeRules.filter(
+      (rule) => rule.scope !== 'platform' || rule.scope_reference === 'youtube_shorts'
+    );
     // If user explicitly tests the honest failure mode ("Test Failure Scenario")
     if (simulateRuleFailure) {
       const failingHook =
@@ -633,8 +651,14 @@ Creator feedback text: "${freeText}"`,
       const failingCaption =
         'Use this 10x secret hack to master complex systems effortlessly with 100% guaranteed recall.';
 
-      const ruleTests = evaluateAllRulesForOutput({
-        rules: activeRules,
+      const instagramRuleTests = evaluateAllRulesForOutput({
+        rules: instagramRules,
+        hook: failingHook,
+        caption: failingCaption,
+        sourceExcerpt,
+      });
+      const youtubeRuleTests = evaluateAllRulesForOutput({
+        rules: youtubeRules,
         hook: failingHook,
         caption: failingCaption,
         sourceExcerpt,
@@ -645,7 +669,9 @@ Creator feedback text: "${freeText}"`,
         instagramCaption: failingCaption,
         youtubeHook: failingHook,
         youtubeCaption: failingCaption,
-        ruleTests,
+        ruleTests: instagramRuleTests,
+        instagramRuleTests,
+        youtubeRuleTests,
         generationSource: 'DEMO FALLBACK' as GenerationSourceLabel,
         summary:
           'Simulated rule-violating output to verify honest deterministic failure reporting.',
@@ -662,18 +688,20 @@ Creator feedback text: "${freeText}"`,
 
     if (ai) {
       try {
-        const rulesList = activeRules
-          .map(
-            (r, idx) =>
-              `${idx + 1}. [${r.rule_type}] ${r.human_readable_description} (Parameters: ${JSON.stringify(
-                r.rule_parameters
-              )})`
-          )
-          .join('\n');
+        const lineBreak = String.fromCharCode(10);
+        const formatRules = (rules: PreferenceRule[]) =>
+          rules.length > 0
+            ? rules.map((rule, index) =>
+                `${index + 1}. [${rule.scope}:${rule.scope_reference} | ${rule.rule_type}] ${rule.human_readable_description} (Parameters: ${JSON.stringify(rule.rule_parameters)})`
+              ).join(lineBreak)
+            : 'No additional confirmed rules for this platform.';
+        const rulesList =
+          'INSTAGRAM REELS RULES:' + lineBreak + formatRules(instagramRules) +
+          lineBreak + lineBreak + 'YOUTUBE SHORTS RULES:' + lineBreak + formatRules(youtubeRules);
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
-          contents: `Rewrite the hook and platform captions for this podcast clip so that it strictly obeys ALL active confirmed creator rules while preserving the exact meaning and qualifications of the source excerpt.
+          contents: `Rewrite the hook and platform captions for this clip while preserving the exact meaning and qualifications of the source excerpt. Apply global/project rules to both platforms and each platform-scoped rule only to its named platform.
 
 SOURCE EXCERPT (verbatim from transcript):
 "${sourceExcerpt}"
@@ -726,17 +754,8 @@ Requirements:
 
     if (!newHook) {
       generationSource = 'DEMO FALLBACK';
-      // Deterministic rule-aware regeneration for the sample candidates or custom transcripts
-      const topicRule = activeRules.find(
-        (r) => r.rule_type === 'INCLUDE_CLEAR_TOPIC'
-      );
-      const qualRule = activeRules.find(
-        (r) => r.rule_type === 'PRESERVE_QUALIFICATIONS'
-      );
-      const conciseRule = activeRules.find(
-        (r) => r.rule_type === 'PREFER_CONCISE_HOOKS'
-      );
-
+      // Deterministic fallback for the sample candidates or custom transcripts.
+      // Platform-scoped preferences must never leak into the other platform's copy.
       if (candidate.candidate_id === 'cand-sample-01') {
         newHook =
           'Write Down Three Problem-Space Questions Before Memorizing Terminology';
@@ -755,7 +774,7 @@ Requirements:
           'Concept Mapping Caveat: Build Foundational Vocabulary First';
         newYtCaption =
           'Classroom trials show sketching concept maps improves recall a week later, unless learners skip the foundational vocabulary prerequisite.';
-      } else {
+      } else if (candidate.candidate_id === 'cand-sample-03') {
         newHook =
           'Use Closed-Note Self-Explanation to Pinpoint Your Learning Boundary';
         newIgCaption =
@@ -764,39 +783,47 @@ Requirements:
           'Closed-Note Self-Explanation vs. Passive Re-Reading in Technical Study';
         newYtCaption =
           'Dr. Elena Rostova breaks down how self-explanation stalls act as diagnostic signals during deliberate practice.';
+      } else {
+        // For user transcripts, never substitute unrelated sample copy.
+        const sourceLead = sourceExcerpt.split(/[.!?]/)[0]?.trim() || sourceExcerpt.trim();
+        const safeLead = sourceLead.length > 100
+          ? `${sourceLead.slice(0, 97).trimEnd()}…`
+          : sourceLead;
+        newHook = safeLead ? `Key idea: ${safeLead}` : 'Key idea from this transcript';
+        newIgCaption = sourceExcerpt;
+        newYtHook = safeLead ? `Understanding: ${safeLead}` : newHook;
+        newYtCaption = sourceExcerpt;
       }
 
-      if (topicRule?.rule_parameters.requiredTopicPhrase) {
-        const phrase = topicRule.rule_parameters.requiredTopicPhrase;
-        if (!newHook.toLowerCase().includes(phrase.toLowerCase())) {
-          newHook = `${phrase}: ${newHook}`;
+      const applyFallbackRules = (hook: string, rules: PreferenceRule[]) => {
+        let output = hook;
+        const topicRule = rules.find((rule) => rule.rule_type === 'INCLUDE_CLEAR_TOPIC');
+        const phrase = topicRule?.rule_parameters.requiredTopicPhrase ?? '';
+        if (phrase && sourceExcerpt.toLowerCase().includes(phrase.toLowerCase()) && !output.toLowerCase().includes(phrase.toLowerCase())) {
+          output = `${phrase}: ${output}`;
         }
-      }
-
-      if (qualRule?.rule_parameters.requiredQualifications?.length) {
-        const firstQual = qualRule.rule_parameters.requiredQualifications[0];
-        if (
-          !`${newHook} ${newIgCaption}`
-            .toLowerCase()
-            .includes(firstQual.toLowerCase())
-        ) {
-          newIgCaption = `${newIgCaption} (Requires ${firstQual} first.)`;
+        const conciseRule = rules.find((rule) => rule.rule_type === 'PREFER_CONCISE_HOOKS');
+        const maxWords = conciseRule?.rule_parameters.maxWords;
+        if (maxWords) {
+          const words = output.trim().split(' ').filter(Boolean);
+          if (words.length > maxWords) output = words.slice(0, maxWords).join(' ');
         }
-      }
-
-      if (conciseRule?.rule_parameters.maxWords) {
-        const maxW = conciseRule.rule_parameters.maxWords;
-        const words = newHook.split(/\s+/).filter(Boolean);
-        if (words.length > maxW) {
-          newHook = words.slice(0, maxW).join(' ');
-        }
-      }
+        return output;
+      };
+      newHook = applyFallbackRules(newHook, instagramRules);
+      newYtHook = applyFallbackRules(newYtHook, youtubeRules);
     }
 
-    const ruleTests = evaluateAllRulesForOutput({
-      rules: activeRules,
+    const instagramRuleTests = evaluateAllRulesForOutput({
+      rules: instagramRules,
       hook: newHook,
       caption: newIgCaption,
+      sourceExcerpt,
+    });
+    const youtubeRuleTests = evaluateAllRulesForOutput({
+      rules: youtubeRules,
+      hook: newYtHook,
+      caption: newYtCaption,
       sourceExcerpt,
     });
 
@@ -805,7 +832,9 @@ Requirements:
       instagramCaption: newIgCaption,
       youtubeHook: newYtHook,
       youtubeCaption: newYtCaption,
-      ruleTests,
+      ruleTests: instagramRuleTests,
+      instagramRuleTests,
+      youtubeRuleTests,
       generationSource,
       summary: `Regenerated with ${activeRules.length} active confirmed rule(s) [${generationSource}].`,
     });

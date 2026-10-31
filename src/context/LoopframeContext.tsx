@@ -264,10 +264,21 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
           }),
         });
 
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.error || `Candidate generation failed (HTTP ${response.status}).`
+          );
+        }
         const data = await response.json();
         const candidates: ClipCandidate[] = Array.isArray(data.candidates)
           ? data.candidates
           : [];
+        if (candidates.length === 0) {
+          throw new Error(
+            'Candidate generation returned no valid candidates. Check the transcript length and try again.'
+          );
+        }
         const generationSource: GenerationSourceLabel =
           data.generationSource || 'DEMO FALLBACK';
 
@@ -466,7 +477,13 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
             freeText: params.freeText,
           }),
         });
+        if (!res.ok) {
+          throw new Error(`Feedback mapping failed (HTTP ${res.status}).`);
+        }
         const data = await res.json();
+        if (!data.proposedRule || typeof data.proposedRule !== 'object') {
+          throw new Error('Feedback mapper returned no valid rule proposal.');
+        }
         proposedRule = data.proposedRule;
         reliableMapping = Boolean(data.reliableMapping);
         mappingSource = data.mappingSource || 'DETERMINISTIC_MAPPER';
@@ -596,10 +613,17 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
             )
           : [confirmedRule, ...prev.preferences];
 
-        const activeRules = getApplicableActiveRules(
+        const instagramRules = getApplicableActiveRules(
           nextPreferences,
-          params.projectId
+          params.projectId,
+          'instagram_reels'
         );
+        const youtubeRules = getApplicableActiveRules(
+          nextPreferences,
+          params.projectId,
+          'youtube_shorts'
+        );
+        const allRuleIds = [...new Set([...instagramRules, ...youtubeRules].map((r) => r.rule_id))];
 
         const nextState: LoopframeStoreState = {
           ...prev,
@@ -619,16 +643,33 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
                       : fe
                   ),
                   candidates: p.candidates.map((c) => {
-                    const updatedTests = evaluateAllRulesForOutput({
-                      rules: activeRules,
-                      hook: c.suggested_hook,
+                    const instagramTests = evaluateAllRulesForOutput({
+                      rules: instagramRules,
+                      hook: c.platform_copy.instagram_reels.hook,
                       caption: c.platform_copy.instagram_reels.caption,
+                      sourceExcerpt: c.source_excerpt,
+                    });
+                    const youtubeTests = evaluateAllRulesForOutput({
+                      rules: youtubeRules,
+                      hook: c.platform_copy.youtube_shorts.hook,
+                      caption: c.platform_copy.youtube_shorts.caption,
                       sourceExcerpt: c.source_excerpt,
                     });
                     return {
                       ...c,
-                      active_rules_applied: activeRules.map((r) => r.rule_id),
-                      rule_test_results: updatedTests,
+                      active_rules_applied: allRuleIds,
+                      rule_test_results: instagramTests,
+                      platform_copy: {
+                        ...c.platform_copy,
+                        instagram_reels: {
+                          ...c.platform_copy.instagram_reels,
+                          rule_tests: instagramTests,
+                        },
+                        youtube_shorts: {
+                          ...c.platform_copy.youtube_shorts,
+                          rule_tests: youtubeTests,
+                        },
+                      },
                     };
                   }),
                 }
@@ -696,12 +737,25 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
       );
       if (!candidate) return;
 
-      const activeRules = getApplicableActiveRules(
+      const savedPreferences =
         latestState.preferences.length >= state.preferences.length
           ? latestState.preferences
-          : state.preferences,
-        params.projectId
+          : state.preferences;
+      const activeRules = getApplicableActiveRules(
+        savedPreferences,
+        params.projectId,
+        'instagram_reels'
       );
+      const youtubeRules = getApplicableActiveRules(
+        savedPreferences,
+        params.projectId,
+        'youtube_shorts'
+      );
+      const generationRuleMap = new Map<string, PreferenceRule>();
+      [...activeRules, ...youtubeRules].forEach((rule) =>
+        generationRuleMap.set(rule.rule_id, rule)
+      );
+      const generationRules = [...generationRuleMap.values()];
 
       setIsGenerating(true);
       try {
@@ -711,10 +765,13 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
           body: JSON.stringify({
             candidate,
             segments: project.segments,
-            activeRules,
+            activeRules: generationRules,
             simulateRuleFailure: Boolean(params.simulateRuleFailure),
           }),
         });
+        if (!res.ok) {
+          throw new Error(`Regeneration failed (${res.status}): ${await res.text()}`);
+        }
         const data = await res.json();
 
         const newHook = String(data.hook || candidate.suggested_hook);
@@ -747,22 +804,24 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
         });
 
         const ytTests = evaluateAllRulesForOutput({
-          rules: getApplicableActiveRules(
-            state.preferences,
-            params.projectId,
-            'youtube_shorts'
-          ),
+          rules: youtubeRules,
           hook: newYtHook,
           caption: newYtCaption,
           sourceExcerpt: candidate.source_excerpt,
         });
 
-        const anyFailed = igTests.some((t) => t.outcome === 'Fail');
+        const allPlatformTests = [...igTests, ...ytTests];
+        const anyFailed = allPlatformTests.some((t) => t.outcome === 'Fail');
+        const hasAdvisories = allPlatformTests.some((t) => t.outcome === 'Advisory');
 
         setState((prev) => ({
           ...prev,
           preferences: prev.preferences.map((r) => {
-            const matchingTest = igTests.find((t) => t.rule_id === r.rule_id);
+            const matchingTests = allPlatformTests.filter((t) => t.rule_id === r.rule_id);
+            const matchingTest =
+              matchingTests.find((t) => t.outcome === 'Fail') ??
+              matchingTests.find((t) => t.outcome === 'Advisory') ??
+              matchingTests[0];
             if (!matchingTest) return r;
             return {
               ...r,
@@ -771,69 +830,77 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               last_test_detail: matchingTest.matched_phrase_or_reason,
             };
           }),
-          projects: prev.projects.map((p) =>
-            p.project_id === params.projectId
-              ? {
-                  ...p,
-                  updated_at: now,
-                  status: anyFailed ? 'In review' : 'Rules verified',
-                  candidates: p.candidates.map((c) =>
-                    c.candidate_id === params.candidateId
-                      ? {
-                          ...c,
-                          suggested_hook: newHook,
-                          context_status: ctx.context_status,
-                          review_status: anyFailed
-                            ? 'Needs review'
-                            : 'Needs review',
-                          deterministic_checks: ctx.deterministic_checks,
-                          advisory_checks: ctx.advisory_checks,
-                          active_rules_applied: activeRules.map(
-                            (r) => r.rule_id
-                          ),
-                          rule_test_results: igTests,
-                          generation_source: generationSource,
-                          risk_flags: anyFailed
-                            ? [
-                                'Failed deterministic post-generation rule test — review required',
-                              ]
-                            : [],
-                          platform_copy: {
-                            instagram_reels: {
-                              ...c.platform_copy.instagram_reels,
-                              hook: newHook,
-                              caption: newIgCaption,
-                              rule_tests: igTests,
-                              updated_at: now,
-                            },
-                            youtube_shorts: {
-                              ...c.platform_copy.youtube_shorts,
-                              hook: newYtHook,
-                              caption: newYtCaption,
-                              rule_tests: ytTests,
-                              updated_at: now,
-                            },
-                          },
-                          revisions: [
-                            {
-                              revision_id: `rev-${Date.now().toString(36)}`,
-                              timestamp: now,
-                              summary:
-                                data.summary ||
-                                `Regenerated with ${activeRules.length} active rule(s).`,
-                              previous_hook: c.suggested_hook,
-                              new_hook: newHook,
-                              previous_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
-                              new_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
-                            },
-                            ...c.revisions,
-                          ],
-                        }
-                      : c
-                  ),
-                }
-              : p
-          ),
+          projects: prev.projects.map((p) => {
+            if (p.project_id !== params.projectId) return p;
+            const updatedCandidates = p.candidates.map((c) =>
+              c.candidate_id === params.candidateId
+                ? {
+                    ...c,
+                    suggested_hook: newHook,
+                    context_status: ctx.context_status,
+                    review_status: 'Needs review' as const,
+                    deterministic_checks: ctx.deterministic_checks,
+                    advisory_checks: ctx.advisory_checks,
+                    active_rules_applied: generationRules.map((r) => r.rule_id),
+                    rule_test_results: igTests,
+                    generation_source: generationSource,
+                    risk_flags: [
+                      ...(anyFailed ? ['Failed deterministic post-generation rule test — review required'] : []),
+                      ...(hasAdvisories ? ['AI advisory outcome — human review required'] : []),
+                    ],
+                    platform_copy: {
+                      instagram_reels: {
+                        ...c.platform_copy.instagram_reels,
+                        hook: newHook,
+                        caption: newIgCaption,
+                        rule_tests: igTests,
+                        updated_at: now,
+                      },
+                      youtube_shorts: {
+                        ...c.platform_copy.youtube_shorts,
+                        hook: newYtHook,
+                        caption: newYtCaption,
+                        rule_tests: ytTests,
+                        updated_at: now,
+                      },
+                    },
+                    revisions: [
+                      {
+                        revision_id: `rev-${Date.now().toString(36)}`,
+                        timestamp: now,
+                        summary: data.summary || `Regenerated with ${generationRules.length} active rule(s).`,
+                        previous_hook: c.suggested_hook,
+                        new_hook: newHook,
+                        previous_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
+                        new_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
+                      },
+                      ...c.revisions,
+                    ],
+                  }
+                : c
+            );
+            const allCandidatesVerified =
+              updatedCandidates.length > 0 &&
+              generationRules.length > 0 &&
+              updatedCandidates.every((candidate) =>
+                instagramRules.every((rule) =>
+                  candidate.platform_copy.instagram_reels.rule_tests.some(
+                    (test) => test.rule_id === rule.rule_id && test.outcome === 'Pass'
+                  )
+                ) &&
+                youtubeRules.every((rule) =>
+                  candidate.platform_copy.youtube_shorts.rule_tests.some(
+                    (test) => test.rule_id === rule.rule_id && test.outcome === 'Pass'
+                  )
+                )
+              );
+            return {
+              ...p,
+              updated_at: now,
+              status: allCandidatesVerified ? 'Rules verified' : 'In review',
+              candidates: updatedCandidates,
+            };
+          }),
           auditEvents: [
             {
               event_id: `aud-${Date.now().toString(36)}`,
@@ -841,7 +908,9 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               event_type: 'rule_tested',
               description: anyFailed
                 ? `Post-generation deterministic test FAILED on ${params.candidateId}. Preference was NOT marked as compliant.`
-                : `Regenerated ${params.candidateId} with ${activeRules.length} rule(s); all deterministic tests passed.`,
+                : hasAdvisories
+                  ? `Regenerated ${params.candidateId}; advisory checks still require human review.`
+                  : `Regenerated ${params.candidateId} with ${generationRules.length} rules; all checks passed for this candidate.`,
               project_id: params.projectId,
               candidate_id: params.candidateId,
             },
@@ -850,19 +919,31 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
         }));
 
         if (anyFailed) {
-          const failedRule = igTests.find((t) => t.outcome === 'Fail');
+          const failedRule = allPlatformTests.find((t) => t.outcome === 'Fail');
           addToast({
             title: 'Rule test failed',
             description: `${failedRule?.rule_type}: ${failedRule?.matched_phrase_or_reason}`,
             variant: 'error',
           });
+        } else if (hasAdvisories) {
+          addToast({
+            title: 'Human review still required',
+            description: `${allPlatformTests.filter((t) => t.outcome === 'Advisory').length} advisory result(s) need review. No deterministic failure was detected (${generationSource}).`,
+            variant: 'warning',
+          });
         } else {
           addToast({
             title: 'Regenerated & verified against active rules',
-            description: `Checked ${igTests.length} active rule(s) (${generationSource}).`,
+            description: `All ${allPlatformTests.length} platform rule results passed (${generationSource}).`,
             variant: 'success',
           });
         }
+      } catch (err: unknown) {
+        addToast({
+          title: 'Regeneration failed',
+          description: err instanceof Error ? err.message : 'Could not regenerate this candidate.',
+          variant: 'error',
+        });
       } finally {
         setIsGenerating(false);
       }
@@ -1127,7 +1208,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!prev.lastDeletedPreference) return prev;
       const restored: PreferenceRule = {
         ...prev.lastDeletedPreference,
-        status: 'active',
+        status: prev.lastDeletedPreference.status,
         updated_at: new Date().toISOString(),
       };
       return {
@@ -1140,7 +1221,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     addToast({
       title: 'Preference restored',
-      description: 'Undo succeeded: rule is active again.',
+      description: 'Undo succeeded: the rule’s previous state was restored.',
       variant: 'success',
     });
   }, [addToast]);

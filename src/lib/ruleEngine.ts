@@ -517,21 +517,47 @@ export function runDeterministicRuleTest(params: {
         'foundational',
         'unless',
         'however',
-        'first',
-        'context',
-        'practice',
-        'before',
+        'in most cases',
+        'for beginners',
+        'only if',
+        'only when',
+        'only after',
+        'provided that',
+        'except when',
       ];
-      const matchedQual = qualTerms.find((q) =>
-        combinedLower.includes(q.toLowerCase())
+      const normalize = (value: string) =>
+        ' ' + value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+      const containsTerm = (text: string, term: string) =>
+        normalize(text).includes(normalize(term));
+      const sourceQualTerms = qualTerms.filter((term) =>
+        containsTerm(sourceExcerpt, term)
       );
-      if (!matchedQual) {
+
+      // Without a detectable marker in the selected excerpt, the engine cannot
+      // claim a deterministic pass. Adjacent-context checks remain separate.
+      if (sourceQualTerms.length === 0) {
+        return {
+          rule_id: rule.rule_id,
+          rule_type: rule.rule_type,
+          rule_description: rule.human_readable_description,
+          outcome: 'Advisory',
+          matched_phrase_or_reason:
+            'No configured qualification marker was found in the selected source excerpt; inspect adjacent transcript context manually.',
+          tested_target: 'both',
+        };
+      }
+
+      const missingQualTerms = sourceQualTerms.filter(
+        (term) => !containsTerm(combinedCopy, term)
+      );
+      if (missingQualTerms.length > 0) {
         return {
           rule_id: rule.rule_id,
           rule_type: rule.rule_type,
           rule_description: rule.human_readable_description,
           outcome: 'Fail',
-          matched_phrase_or_reason: `No required qualification markers (${qualTerms.slice(0, 4).join(', ')}) retained in hook or caption.`,
+          matched_phrase_or_reason:
+            'Source qualification marker(s) omitted from generated copy: ' + missingQualTerms.join(', ') + '.',
           tested_target: 'both',
         };
       }
@@ -540,7 +566,8 @@ export function runDeterministicRuleTest(params: {
         rule_type: rule.rule_type,
         rule_description: rule.human_readable_description,
         outcome: 'Pass',
-        matched_phrase_or_reason: `Retained qualification term "${matchedQual}" from source context.`,
+        matched_phrase_or_reason:
+          'Retained all ' + sourceQualTerms.length + ' configured qualification marker(s) detected in the source excerpt.',
         tested_target: 'both',
       };
     }
