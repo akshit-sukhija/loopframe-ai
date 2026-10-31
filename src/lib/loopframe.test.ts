@@ -11,6 +11,7 @@ import {
   runDeterministicRuleTest,
 } from './ruleEngine';
 import { buildInitialSeedState, SAMPLE_TRANSCRIPT_RAW } from './seedData';
+import type { PreferenceRule } from '../types/loopframe';
 
 test('parseTimestampedTranscript parses valid lines and preserves verbatim text without inventing speaker labels', () => {
   const raw = `[00:00:05] Speaker A: First segment text here.
