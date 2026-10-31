@@ -795,6 +795,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
 
         const allPlatformTests = [...igTests, ...ytTests];
         const anyFailed = allPlatformTests.some((t) => t.outcome === 'Fail');
+        const hasAdvisories = allPlatformTests.some((t) => t.outcome === 'Advisory');
 
         setState((prev) => ({
           ...prev,
@@ -817,7 +818,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               ? {
                   ...p,
                   updated_at: now,
-                  status: anyFailed ? 'In review' : 'Rules verified',
+                  status: anyFailed || hasAdvisories ? 'In review' : 'Rules verified',
                   candidates: p.candidates.map((c) =>
                     c.candidate_id === params.candidateId
                       ? {
@@ -834,11 +835,10 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
                           ),
                           rule_test_results: igTests,
                           generation_source: generationSource,
-                          risk_flags: anyFailed
-                            ? [
-                                'Failed deterministic post-generation rule test — review required',
-                              ]
-                            : [],
+                          risk_flags: [
+                            ...(anyFailed ? ['Failed deterministic post-generation rule test — review required'] : []),
+                            ...(hasAdvisories ? ['AI advisory outcome — human review required'] : []),
+                          ],
                           platform_copy: {
                             instagram_reels: {
                               ...c.platform_copy.instagram_reels,
@@ -897,10 +897,16 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
             description: `${failedRule?.rule_type}: ${failedRule?.matched_phrase_or_reason}`,
             variant: 'error',
           });
+        } else if (hasAdvisories) {
+          addToast({
+            title: 'Human review still required',
+            description: `${allPlatformTests.filter((t) => t.outcome === 'Advisory').length} advisory result(s) need review. No deterministic failure was detected (${generationSource}).`,
+            variant: 'warning',
+          });
         } else {
           addToast({
             title: 'Regenerated & verified against active rules',
-            description: `Checked ${allPlatformTests.length} platform rule result(s) (${generationSource}).`,
+            description: `All ${allPlatformTests.length} platform rule results passed (${generationSource}).`,
             variant: 'success',
           });
         }
@@ -1181,7 +1187,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     addToast({
       title: 'Preference restored',
-      description: 'Undo succeeded: rule is active again.',
+      description: 'Undo succeeded: the rule’s previous state was restored.',
       variant: 'success',
     });
   }, [addToast]);
