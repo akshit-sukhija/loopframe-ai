@@ -294,7 +294,12 @@ async function startServer() {
     const lineBreak = String.fromCharCode(10);
     const formatRules = (rules: PreferenceRule[]) =>
       rules.length > 0
-        ? rules.map((r, i) => `${i + 1}. [${r.scope}:${r.scope_reference} | ${r.rule_type}] ${r.human_readable_description (Params: ${JSON.stringify(r.rule_parameters)})`).join(lineBreak)
+        ? rules
+            .map(
+              (r, i) =>
+                `${i + 1}. [${r.scope}:${r.scope_reference} | ${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(r.rule_parameters)})`
+            )
+            .join(lineBreak)
         : 'No custom creator rules active for this platform.';
     const rulesPrompt =
       'INSTAGRAM REELS RULES (MUST OBEY):' + lineBreak + formatRules(instagramRules) +
@@ -667,14 +672,13 @@ Creator feedback text: "${freeText}"`,
 
     if (ai) {
       try {
+        const lineBreak = String.fromCharCode(10);
         const rulesList = activeRules
           .map(
             (r, idx) =>
-              `${idx + 1}. [${r.scope}:${r.scope_reference} | ${r.rule_type}] ${r.human_readable_description (Parameters: ${JSON.stringify(
-                r.rule_parameters
-              )})`
+              `${idx + 1}. [${r.scope}:${r.scope_reference} | ${r.rule_type}] ${r.human_readable_description} (Parameters: ${JSON.stringify(r.rule_parameters)})`
           )
-          .join('\n');
+          .join(lineBreak);
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
@@ -772,7 +776,7 @@ Requirements:
       } else {
         // For user transcripts, never substitute unrelated sample copy.
         // The fallback stays close to the selected source excerpt and is labelled DEMO FALLBACK.
-        const sourceLead = sourceExcerpt.split(/(?<=[.!?])\\s+/)[0]?.trim() || sourceExcerpt.trim();
+        const sourceLead = sourceExcerpt.split(/[.!?]/)[0]?.trim() || sourceExcerpt.trim();
         const safeLead = sourceLead.length > 100
           ? `${sourceLead.slice(0, 97).trimEnd()}…`
           : sourceLead;
