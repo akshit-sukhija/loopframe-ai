@@ -264,10 +264,21 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
           }),
         });
 
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.error || `Candidate generation failed (HTTP ${response.status}).`
+          );
+        }
         const data = await response.json();
         const candidates: ClipCandidate[] = Array.isArray(data.candidates)
           ? data.candidates
           : [];
+        if (candidates.length === 0) {
+          throw new Error(
+            'Candidate generation returned no valid candidates. Check the transcript length and try again.'
+          );
+        }
         const generationSource: GenerationSourceLabel =
           data.generationSource || 'DEMO FALLBACK';
 
@@ -466,7 +477,13 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
             freeText: params.freeText,
           }),
         });
+        if (!res.ok) {
+          throw new Error(`Feedback mapping failed (HTTP ${res.status}).`);
+        }
         const data = await res.json();
+        if (!data.proposedRule || typeof data.proposedRule !== 'object') {
+          throw new Error('Feedback mapper returned no valid rule proposal.');
+        }
         proposedRule = data.proposedRule;
         reliableMapping = Boolean(data.reliableMapping);
         mappingSource = data.mappingSource || 'DETERMINISTIC_MAPPER';
