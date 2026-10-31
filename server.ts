@@ -502,6 +502,8 @@ ${transcriptListing}
           projectId,
           segments,
           activeRules,
+          instagramRules,
+          youtubeRules,
         });
         res.json({
           candidates: fallbackCandidates,
