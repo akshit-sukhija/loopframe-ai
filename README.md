@@ -23,6 +23,12 @@ npm run build    # Builds production frontend bundle
 - **Backend (`server.ts`):** Node/Express server hosting `/api/parse-transcript`, `/api/generate-candidates`, `/api/parse-feedback`, and `/api/regenerate-candidate` using `@google/genai` (`gemini-3.8-flash`) with structured JSON schema validation, 1-retry correction loop, and clearly labelled deterministic fallback (`DEMO FALLBACK`).
 - **Persistence Adapter:** Isolated local storage adapter (`loopframe_v4_store_v1`) labelled honestly as a **Single-User Local Demo Store**. Persists projects, immutable transcript segments, candidates, creator feedback events, confirmed preference rules, approved library items, and audit events across browser refreshes.
 
+### Voice input with Wispr Flow
+- On desktop, focus the transcript field in **Projects → New Project**, then use Wispr Flow's system-wide dictation shortcut. The completed dictation is inserted into the focused field; LOOPFRAME does not embed Wispr Flow or capture microphone audio itself.
+- The New Project screen includes a Wispr Flow quick-start panel, Windows/macOS shortcut reference, a field-focus action, and a link to the official setup guide.
+- LOOPFRAME's transcript parser still requires one explicit timestamp at the start of every non-empty line (for example: `[00:00:05] Host: Welcome back`). Wispr Flow does not generate source-video timecodes. Dictate or add the timecodes yourself, then review the punctuation and validation results before creating the project.
+- This is desktop text dictation into an existing input, not automatic audio-file transcription. Browser microphone recording and automatic timecode alignment are not implemented.
+
 ---
 
 ## 3. Environment Variables
