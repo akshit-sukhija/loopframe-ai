@@ -368,340 +368,25 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         if (!asm.valid) return prev;
 
-        const activeRules = getApplicableActiveRules(
-          prev.preferences,
-          projectId
-        );
-        const ctx = evaluateContextIntegrity({
-          allSegments: project.segments,
-          startSegmentId: newStartId,
-          endSegmentId: newEndId,
-          assembledExcerpt: asm.sourceExcerpt,
-          suggestedHook: candidate.suggested_hook,
-          captionText: candidate.platform_copy.instagram_reels.caption,
-        });
-
-        const updatedRuleTests = evaluateAllRulesForOutput({
-          rules: activeRules,
-          hook: candidate.suggested_hook,
-          caption: candidate.platform_copy.instagram_reels.caption,
-          sourceExcerpt: asm.sourceExcerpt,
-        });
-
-        const now = new Date().toISOString();
-        const updatedCandidate: ClipCandidate = {
-          ...candidate,
-          start_segment_id: newStartId,
-          end_segment_id: newEndId,
-          source_segment_ids: asm.sourceSegmentIds,
-          source_excerpt: asm.sourceExcerpt,
-          start_ms: asm.startMs,
-          end_ms: asm.endMs,
-          duration_sec: asm.durationSec,
-          context_status: ctx.context_status,
-          deterministic_checks: ctx.deterministic_checks,
-          advisory_checks: ctx.advisory_checks,
-          rule_test_results: updatedRuleTests,
-          revisions: [
-            {
-              revision_id: `rev-${Date.now().toString(36)}`,
-              timestamp: now,
-              summary: `Expanded source boundary ${direction} to ${newStartId}–${newEndId} and re-ran 7 deterministic checks.`,
-              previous_hook: candidate.suggested_hook,
-              new_hook: candidate.suggested_hook,
-              previous_segment_range: `${candidate.start_segment_id}–${candidate.end_segment_id}`,
-              new_segment_range: `${newStartId}–${newEndId}`,
-            },
-            ...candidate.revisions,
-          ],
-        };
-
-        return {
-          ...prev,
-          projects: prev.projects.map((p) =>
-            p.project_id === projectId
-              ? {
-                  ...p,
-                  updated_at: now,
-                  candidates: p.candidates.map((c) =>
-                    c.candidate_id === candidateId ? updatedCandidate : c
-                  ),
-                }
-              : p
-          ),
-        };
-      });
-
-      addToast({
-        title: 'Context window expanded & re-verified',
-        description: `Re-ran all 7 deterministic checks and 4 AI advisory checks on updated segment range.`,
-        variant: 'info',
-      });
-    },
-    [addToast]
-  );
-
-  const submitCandidateFeedback = useCallback(
-    async (params: {
-      projectId: string;
-      candidateId: string;
-      actionTaken: 'rejected' | 'edited' | 'flagged';
-      reasonChips: FeedbackReasonChip[];
-      freeText: string;
-    }): Promise<FeedbackEvent | null> => {
-      const feedbackId = `fb-${Date.now().toString(36)}`;
-      let proposedRule: PreferenceRule | null = null;
-      let reliableMapping = false;
-      let mappingSource: GenerationSourceLabel | 'DETERMINISTIC_MAPPER' =
-        'DETERMINISTIC_MAPPER';
-
-      try {
-        const res = await fetch('/api/parse-feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            feedbackId,
-            projectId: params.projectId,
-            reasonChips: params.reasonChips,
-            freeText: params.freeText,
-          }),
-        });
-        const data = await res.json();
-        proposedRule = data.proposedRule;
-        reliableMapping = Boolean(data.reliableMapping);
-        mappingSource = data.mappingSource || 'DETERMINISTIC_MAPPER';
-      } catch {
-        const localMap = mapCreatorFeedbackToProposedRule({
-          feedbackId,
-          projectId: params.projectId,
-          reasonChips: params.reasonChips,
-          freeText: params.freeText,
-        });
-        proposedRule = localMap.proposedRule;
-        reliableMapping = localMap.reliableMapping;
-      }
-
-      const now = new Date().toISOString();
-      const newEvent: FeedbackEvent = {
-        feedback_id: feedbackId,
-        project_id: params.projectId,
-        candidate_id: params.candidateId,
-        action_taken: params.actionTaken,
-        reason_chips: params.reasonChips,
-        free_text: params.freeText,
-        created_at: now,
-        proposed_rule: proposedRule,
-        confirmation_status: reliableMapping
-          ? 'pending_confirmation'
-          : 'saved_as_note',
-        mapping_source: mappingSource,
-      };
-
-      setState((prev) => {
-        // If no reliable mapping exists, save as a note requiring manual review (status: 'paused', confirmed_by_user: false)
-        const nextPreferences =
-          !reliableMapping && proposedRule
-            ? [
-                {
-                  ...proposedRule,
-                  status: 'paused' as const,
-                  confirmed_by_user: false,
-                },
-                ...prev.preferences,
-              ]
-            : prev.preferences;
-
-        return {
-          ...prev,
-          preferences: nextPreferences,
-          projects: prev.projects.map((p) =>
-            p.project_id === params.projectId
-              ? {
-                  ...p,
-                  updated_at: now,
-                  feedback_events: [newEvent, ...p.feedback_events],
-                  candidates: p.candidates.map((c) =>
-                    c.candidate_id === params.candidateId
-                      ? {
-                          ...c,
-                          review_status:
-                            params.actionTaken === 'rejected'
-                              ? 'Rejected'
-                              : params.actionTaken === 'flagged'
-                              ? 'Flagged for context review'
-                              : c.review_status,
-                        }
-                      : c
-                  ),
-                }
-              : p
-          ),
-          auditEvents: [
-            {
-              event_id: `aud-${Date.now().toString(36)}`,
-              timestamp: now,
-              event_type: 'feedback_submitted',
-              description: reliableMapping
-                ? `Feedback mapped to proposed rule [${proposedRule?.rule_type}] — awaiting user confirmation.`
-                : `Unmapped feedback saved as manual review note [CUSTOM_REVIEW_REQUIRED].`,
-              project_id: params.projectId,
-              candidate_id: params.candidateId,
-            },
-            ...prev.auditEvents,
-          ],
-        };
-      });
-
-      if (reliableMapping) {
-        addToast({
-          title: 'Rule proposed from your correction',
-          description: `Review and confirm [${proposedRule?.rule_type}] before saving to Memory.`,
-          variant: 'info',
-        });
-      } else {
-        addToast({
-          title: 'Saved as manual review note',
-          description:
-            'Feedback did not map to a deterministic rule; stored as a review note in Memory.',
-          variant: 'warning',
-        });
-      }
-
-      return newEvent;
-    },
-    [addToast]
-  );
-
-  const confirmProposedRule = useCallback(
-    (params: {
-      projectId: string;
-      feedbackId: string;
-      updatedRule: PreferenceRule;
-    }) => {
-      const now = new Date().toISOString();
-      const confirmedRule: PreferenceRule = {
-        ...params.updatedRule,
-        confirmed_by_user: true,
-        status: 'active',
-        updated_at: now,
-      };
-
-      setState((prev) => {
-        const exists = prev.preferences.some(
-          (r) => r.rule_id === confirmedRule.rule_id
-        );
-        const nextPreferences = exists
-          ? prev.preferences.map((r) =>
-              r.rule_id === confirmedRule.rule_id ? confirmedRule : r
-            )
-          : [confirmedRule, ...prev.preferences];
-
-        const activeRules = getApplicableActiveRules(
-          nextPreferences,
-          params.projectId
-        );
-
-        const nextState: LoopframeStoreState = {
-          ...prev,
-          preferences: nextPreferences,
-          projects: prev.projects.map((p) =>
-            p.project_id === params.projectId
-              ? {
-                  ...p,
-                  updated_at: now,
-                  feedback_events: p.feedback_events.map((fe) =>
-                    fe.feedback_id === params.feedbackId
-                      ? {
-                          ...fe,
-                          proposed_rule: confirmedRule,
-                          confirmation_status: 'confirmed',
-                        }
-                      : fe
-                  ),
-                  candidates: p.candidates.map((c) => {
-                    const updatedTests = evaluateAllRulesForOutput({
-                      rules: activeRules,
-                      hook: c.suggested_hook,
-                      caption: c.platform_copy.instagram_reels.caption,
-                      sourceExcerpt: c.source_excerpt,
-                    });
-                    return {
-                      ...c,
-                      active_rules_applied: activeRules.map((r) => r.rule_id),
-                      rule_test_results: updatedTests,
-                    };
-                  }),
-                }
-              : p
-          ),
-          auditEvents: [
-            {
-              event_id: `aud-${Date.now().toString(36)}`,
-              timestamp: now,
-              event_type: 'rule_confirmed',
-              description: `Creator confirmed rule [${confirmedRule.rule_type}] (${confirmedRule.scope} scope) in Preference Ledger.`,
-              project_id: params.projectId,
-              rule_id: confirmedRule.rule_id,
-            },
-            ...prev.auditEvents,
-          ],
-        };
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-        return nextState;
-      });
-
-      addToast({
-        title: 'Preference saved to Memory',
-        description: `Confirmed rule [${confirmedRule.rule_type}] is now active for future generation.`,
-        variant: 'success',
-      });
-    },
-    [addToast]
-  );
-
-  const dismissProposedRule = useCallback(
-    (projectId: string, feedbackId: string) => {
-      setState((prev) => ({
-        ...prev,
-        projects: prev.projects.map((p) =>
-          p.project_id === projectId
-            ? {
-                ...p,
-                feedback_events: p.feedback_events.map((fe) =>
-                  fe.feedback_id === feedbackId
-                    ? { ...fe, confirmation_status: 'dismissed' }
-                    : fe
-                ),
-              }
-            : p
-        ),
-      }));
-    },
-    []
-  );
-
-  const regenerateCandidateWithRules = useCallback(
-    async (params: {
-      projectId: string;
-      candidateId: string;
-      simulateRuleFailure?: boolean;
-    }) => {
-      const latestState = loadStateFromAdapter();
-      const project =
-        latestState.projects.find((p) => p.project_id === params.projectId) ??
-        state.projects.find((p) => p.project_id === params.projectId);
-      if (!project) return;
-      const candidate = project.candidates.find(
-        (c) => c.candidate_id === params.candidateId
-      );
-      if (!candidate) return;
-
-      const activeRules = getApplicableActiveRules(
+        const savedPreferences =
         latestState.preferences.length >= state.preferences.length
           ? latestState.preferences
-          : state.preferences,
-        params.projectId
+          : state.preferences;
+      const instagramRules = getApplicableActiveRules(
+        savedPreferences,
+        params.projectId,
+        'instagram_reels'
       );
+      const youtubeRules = getApplicableActiveRules(
+        savedPreferences,
+        params.projectId,
+        'youtube_shorts'
+      );
+      const generationRuleMap = new Map<string, PreferenceRule>();
+      [...instagramRules, ...youtubeRules].forEach((rule) =>
+        generationRuleMap.set(rule.rule_id, rule)
+      );
+      const generationRules = [...generationRuleMap.values()];
 
       setIsGenerating(true);
       try {
@@ -711,10 +396,13 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
           body: JSON.stringify({
             candidate,
             segments: project.segments,
-            activeRules,
+            activeRules: generationRules,
             simulateRuleFailure: Boolean(params.simulateRuleFailure),
           }),
         });
+        if (!res.ok) {
+          throw new Error(`Regeneration failed (${res.status}): ${await res.text()}`);
+        }
         const data = await res.json();
 
         const newHook = String(data.hook || candidate.suggested_hook);
@@ -740,29 +428,31 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
         });
 
         const igTests = evaluateAllRulesForOutput({
-          rules: activeRules,
+          rules: instagramRules,
           hook: newHook,
           caption: newIgCaption,
           sourceExcerpt: candidate.source_excerpt,
         });
 
         const ytTests = evaluateAllRulesForOutput({
-          rules: getApplicableActiveRules(
-            activeRules.length >= 0 ? latestState.preferences.length >= state.preferences.length ? latestState.preferences : state.preferences : state.preferences,
-            params.projectId,
-            'youtube_shorts'
-          ),
+          rules: youtubeRules,
           hook: newYtHook,
           caption: newYtCaption,
           sourceExcerpt: candidate.source_excerpt,
         });
 
-        const anyFailed = igTests.some((t) => t.outcome === 'Fail');
+        const allPlatformTests = [...igTests, ...ytTests];
+        const anyFailed = allPlatformTests.some((t) => t.outcome === 'Fail');
+        const hasAdvisories = allPlatformTests.some((t) => t.outcome === 'Advisory');        const anyFailed = igTests.some((t) => t.outcome === 'Fail');
 
         setState((prev) => ({
           ...prev,
           preferences: prev.preferences.map((r) => {
-            const matchingTest = igTests.find((t) => t.rule_id === r.rule_id);
+            const matchingTests = allPlatformTests.filter((t) => t.rule_id === r.rule_id);
+            const matchingTest =
+              matchingTests.find((t) => t.outcome === 'Fail') ??
+              matchingTests.find((t) => t.outcome === 'Advisory') ??
+              matchingTests[0];
             if (!matchingTest) return r;
             return {
               ...r,
@@ -776,7 +466,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               ? {
                   ...p,
                   updated_at: now,
-                  status: anyFailed ? 'In review' : 'Rules verified',
+                  status: anyFailed || hasAdvisories ? 'In review' : 'Rules verified',
                   candidates: p.candidates.map((c) =>
                     c.candidate_id === params.candidateId
                       ? {
@@ -788,7 +478,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
                             : 'Needs review',
                           deterministic_checks: ctx.deterministic_checks,
                           advisory_checks: ctx.advisory_checks,
-                          active_rules_applied: activeRules.map(
+                          active_rules_applied: generationRules.map(
                             (r) => r.rule_id
                           ),
                           rule_test_results: igTests,
@@ -820,7 +510,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
                               timestamp: now,
                               summary:
                                 data.summary ||
-                                `Regenerated with ${activeRules.length} active rule(s).`,
+                                `Regenerated with ${generationRules.length} active rule(s).`,
                               previous_hook: c.suggested_hook,
                               new_hook: newHook,
                               previous_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
@@ -841,7 +531,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               event_type: 'rule_tested',
               description: anyFailed
                 ? `Post-generation deterministic test FAILED on ${params.candidateId}. Preference was NOT marked as compliant.`
-                : `Regenerated ${params.candidateId} with ${activeRules.length} rule(s); all deterministic tests passed.`,
+                : `Regenerated ${params.candidateId} with ${generationRules.length} rule(s); all deterministic tests passed.`,
               project_id: params.projectId,
               candidate_id: params.candidateId,
             },
@@ -850,7 +540,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
         }));
 
         if (anyFailed) {
-          const failedRule = igTests.find((t) => t.outcome === 'Fail');
+          const failedRule = allPlatformTests.find((t) => t.outcome === 'Fail');
           addToast({
             title: 'Rule test failed',
             description: `${failedRule?.rule_type}: ${failedRule?.matched_phrase_or_reason}`,
@@ -859,7 +549,9 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
         } else {
           addToast({
             title: 'Regenerated & verified against active rules',
-            description: `Checked ${igTests.length} active rule(s) (${generationSource}).`,
+            description: hasAdvisories
+              ? `Deterministic checks passed; ${allPlatformTests.filter((t) => t.outcome === 'Advisory').length} advisory check(s) still need human review (${generationSource}).`
+              : `Checked ${allPlatformTests.length} platform rule result(s) (${generationSource}).`,
             variant: 'success',
           });
         }
