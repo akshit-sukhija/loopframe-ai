@@ -107,6 +107,9 @@ function buildDeterministicFallbackCandidates(params: {
     }
   }
 
+  if (ranges.length === 0 && total > 0) {
+    ranges.push([0, total - 1, 'Full Transcript Review', 'Full Transcript']);
+  }
 
 
   return ranges.map(([sIdx, eIdx, defaultTitle, cType], index) => {
