@@ -138,7 +138,7 @@ function buildDeterministicFallbackCandidates(params: {
         result = `${topicPhrase}: ${result}`;
       }
       if (maxWordsRule?.rule_parameters.maxWords) {
-        const words = result.split(/\\s+/).filter(Boolean);
+        const words = result.trim().split(' ').filter(Boolean);
         if (words.length > maxWordsRule.rule_parameters.maxWords) {
           result = words.slice(0, maxWordsRule.rule_parameters.maxWords).join(' ');
         }
