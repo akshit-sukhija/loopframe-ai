@@ -525,42 +525,10 @@ export function runDeterministicRuleTest(params: {
         'provided that',
         'except when',
       ];
-      const containsTerm = (text: string, term: string) => {
-        const escaped = term.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\    case 'PRESERVE_QUALIFICATIONS': {
-      const qualTerms = rule.rule_parameters.requiredQualifications ?? [
-        'fundamentals',
-        'foundational',
-        'unless',
-        'however',
-        'first',
-        'context',
-        'practice',
-        'before',
-      ];
-      const matchedQual = qualTerms.find((q) =>
-        combinedLower.includes(q.toLowerCase())
-      );
-      if (!matchedQual) {
-        return {
-          rule_id: rule.rule_id,
-          rule_type: rule.rule_type,
-          rule_description: rule.human_readable_description,
-          outcome: 'Fail',
-          matched_phrase_or_reason: `No required qualification markers (${qualTerms.slice(0, 4).join(', ')}) retained in hook or caption.`,
-          tested_target: 'both',
-        };
-      }
-      return {
-        rule_id: rule.rule_id,
-        rule_type: rule.rule_type,
-        rule_description: rule.human_readable_description,
-        outcome: 'Pass',
-        matched_phrase_or_reason: `Retained qualification term "${matchedQual}" from source context.`,
-        tested_target: 'both',
-      };
-    }');
-        return new RegExp(`(?:^|\\\\W)${escaped}(?:$|\\\\W)`, 'i').test(text);
-      };
+      const normalize = (value: string) =>
+        ' ' + value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+      const containsTerm = (text: string, term: string) =>
+        normalize(text).includes(normalize(term));
       const sourceQualTerms = qualTerms.filter((term) =>
         containsTerm(sourceExcerpt, term)
       );
@@ -588,7 +556,8 @@ export function runDeterministicRuleTest(params: {
           rule_type: rule.rule_type,
           rule_description: rule.human_readable_description,
           outcome: 'Fail',
-          matched_phrase_or_reason: `Source qualification marker(s) omitted from generated copy: ${missingQualTerms.join(', ')}.`,
+          matched_phrase_or_reason:
+            'Source qualification marker(s) omitted from generated copy: ' + missingQualTerms.join(', ') + '.',
           tested_target: 'both',
         };
       }
@@ -597,7 +566,8 @@ export function runDeterministicRuleTest(params: {
         rule_type: rule.rule_type,
         rule_description: rule.human_readable_description,
         outcome: 'Pass',
-        matched_phrase_or_reason: `Retained all ${sourceQualTerms.length} configured qualification marker(s) detected in the source excerpt.`,
+        matched_phrase_or_reason:
+          'Retained all ' + sourceQualTerms.length + ' configured qualification marker(s) detected in the source excerpt.',
         tested_target: 'both',
       };
     }
