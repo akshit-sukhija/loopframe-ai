@@ -755,7 +755,7 @@ Requirements:
           'Concept Mapping Caveat: Build Foundational Vocabulary First';
         newYtCaption =
           'Classroom trials show sketching concept maps improves recall a week later, unless learners skip the foundational vocabulary prerequisite.';
-      } else {
+      } else if (candidate.candidate_id === 'cand-sample-03') {
         newHook =
           'Use Closed-Note Self-Explanation to Pinpoint Your Learning Boundary';
         newIgCaption =
@@ -764,23 +764,27 @@ Requirements:
           'Closed-Note Self-Explanation vs. Passive Re-Reading in Technical Study';
         newYtCaption =
           'Dr. Elena Rostova breaks down how self-explanation stalls act as diagnostic signals during deliberate practice.';
+      } else {
+        // For user transcripts, never substitute unrelated sample copy.
+        // The fallback stays close to the selected source excerpt and is labelled DEMO FALLBACK.
+        const sourceLead = sourceExcerpt.split(/(?<=[.!?])\\s+/)[0]?.trim() || sourceExcerpt.trim();
+        const safeLead = sourceLead.length > 100
+          ? `${sourceLead.slice(0, 97).trimEnd()}…`
+          : sourceLead;
+        newHook = safeLead ? `Key idea: ${safeLead}` : 'Key idea from this transcript';
+        newIgCaption = sourceExcerpt;
+        newYtHook = safeLead ? `Understanding: ${safeLead}` : newHook;
+        newYtCaption = sourceExcerpt;
       }
 
+      // A required topic phrase is added only when it is grounded in the source excerpt.
       if (topicRule?.rule_parameters.requiredTopicPhrase) {
         const phrase = topicRule.rule_parameters.requiredTopicPhrase;
-        if (!newHook.toLowerCase().includes(phrase.toLowerCase())) {
-          newHook = `${phrase}: ${newHook}`;
-        }
-      }
-
-      if (qualRule?.rule_parameters.requiredQualifications?.length) {
-        const firstQual = qualRule.rule_parameters.requiredQualifications[0];
         if (
-          !`${newHook} ${newIgCaption}`
-            .toLowerCase()
-            .includes(firstQual.toLowerCase())
+          sourceExcerpt.toLowerCase().includes(phrase.toLowerCase()) &&
+          !newHook.toLowerCase().includes(phrase.toLowerCase())
         ) {
-          newIgCaption = `${newIgCaption} (Requires ${firstQual} first.)`;
+          newHook = `${phrase}: ${newHook}`;
         }
       }
 
