@@ -293,13 +293,14 @@ async function startServer() {
       return;
     }
 
+    const lineBreak = String.fromCharCode(10);
     const formatRules = (rules: PreferenceRule[]) =>
       rules.length > 0
-        ? rules.map((r, i) => `${i + 1}. [${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(r.rule_parameters)})`).join('\\n')
+        ? rules.map((r, i) => `${i + 1}. [${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(r.rule_parameters)})`).join(lineBreak)
         : 'No custom creator rules active for this platform.';
     const rulesPrompt =
-      `INSTAGRAM REELS RULES (MUST OBEY):\\n${formatRules(instagramRules)}\\n\\n` +
-      `YOUTUBE SHORTS RULES (MUST OBEY):\\n${formatRules(youtubeRules)}`;
+      'INSTAGRAM REELS RULES (MUST OBEY):' + lineBreak + formatRules(instagramRules) +
+      lineBreak + lineBreak + 'YOUTUBE SHORTS RULES (MUST OBEY):' + lineBreak + formatRules(youtubeRules);
 
     const transcriptListing = segments
       .map(
