@@ -53,8 +53,10 @@ function buildDeterministicFallbackCandidates(params: {
   projectId: string;
   segments: TranscriptSegment[];
   activeRules: PreferenceRule[];
+  instagramRules: PreferenceRule[];
+  youtubeRules: PreferenceRule[];
 }): ClipCandidate[] {
-  const { projectId, segments, activeRules } = params;
+  const { projectId, segments, activeRules, instagramRules, youtubeRules } = params;
   const total = segments.length;
   if (total === 0) return [];
 
@@ -163,14 +165,14 @@ function buildDeterministicFallbackCandidates(params: {
     });
 
     const igRules = evaluateAllRulesForOutput({
-      rules: activeRules,
+      rules: instagramRules,
       hook,
       caption: igCaption,
       sourceExcerpt: asm.sourceExcerpt,
     });
 
     const ytRules = evaluateAllRulesForOutput({
-      rules: activeRules,
+      rules: youtubeRules,
       hook,
       caption: ytCaption,
       sourceExcerpt: asm.sourceExcerpt,
@@ -267,7 +269,11 @@ async function startServer() {
       return;
     }
 
-    const activeRules = getApplicableActiveRules(preferences, projectId);
+    const instagramRules = getApplicableActiveRules(preferences, projectId, 'instagram_reels');
+    const youtubeRules = getApplicableActiveRules(preferences, projectId, 'youtube_shorts');
+    const activeRuleMap = new Map<string, PreferenceRule>();
+    [...instagramRules, ...youtubeRules].forEach((rule) => activeRuleMap.set(rule.rule_id, rule));
+    const activeRules = [...activeRuleMap.values()];
     const ai = getGenAIClient();
 
     if (!ai) {
@@ -275,6 +281,8 @@ async function startServer() {
         projectId,
         segments,
         activeRules,
+        instagramRules,
+        youtubeRules,
       });
       res.json({
         candidates: fallbackCandidates,
@@ -285,17 +293,13 @@ async function startServer() {
       return;
     }
 
+    const formatRules = (rules: PreferenceRule[]) =>
+      rules.length > 0
+        ? rules.map((r, i) => `${i + 1}. [${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(r.rule_parameters)})`).join('\\n')
+        : 'No custom creator rules active for this platform.';
     const rulesPrompt =
-      activeRules.length > 0
-        ? `ACTIVE CONFIRMED CREATOR RULES (MUST OBEY):\n${activeRules
-            .map(
-              (r, i) =>
-                `${i + 1}. [${r.rule_type}] ${r.human_readable_description} (Params: ${JSON.stringify(
-                  r.rule_parameters
-                )})`
-            )
-            .join('\n')}`
-        : 'No custom creator rules active yet.';
+      `INSTAGRAM REELS RULES (MUST OBEY):\\n${formatRules(instagramRules)}\\n\\n` +
+      `YOUTUBE SHORTS RULES (MUST OBEY):\\n${formatRules(youtubeRules)}`;
 
     const transcriptListing = segments
       .map(
@@ -407,14 +411,14 @@ ${transcriptListing}
         });
 
         const igRuleTests = evaluateAllRulesForOutput({
-          rules: activeRules,
+          rules: instagramRules,
           hook,
           caption: igCap,
           sourceExcerpt: asm.sourceExcerpt,
         });
 
         const ytRuleTests = evaluateAllRulesForOutput({
-          rules: activeRules,
+          rules: youtubeRules,
           hook: ytHook,
           caption: ytCap,
           sourceExcerpt: asm.sourceExcerpt,
