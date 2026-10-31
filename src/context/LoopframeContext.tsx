@@ -748,7 +748,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
 
         const ytTests = evaluateAllRulesForOutput({
           rules: getApplicableActiveRules(
-            state.preferences,
+            activeRules.length >= 0 ? latestState.preferences.length >= state.preferences.length ? latestState.preferences : state.preferences : state.preferences,
             params.projectId,
             'youtube_shorts'
           ),
@@ -1127,7 +1127,7 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!prev.lastDeletedPreference) return prev;
       const restored: PreferenceRule = {
         ...prev.lastDeletedPreference,
-        status: 'active',
+        status: prev.lastDeletedPreference.status === 'deleted' ? 'active' : prev.lastDeletedPreference.status,
         updated_at: new Date().toISOString(),
       };
       return {
