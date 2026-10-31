@@ -830,68 +830,77 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               last_test_detail: matchingTest.matched_phrase_or_reason,
             };
           }),
-          projects: prev.projects.map((p) =>
-            p.project_id === params.projectId
-              ? {
-                  ...p,
-                  updated_at: now,
-                  status: anyFailed || hasAdvisories ? 'In review' : 'Rules verified',
-                  candidates: p.candidates.map((c) =>
-                    c.candidate_id === params.candidateId
-                      ? {
-                          ...c,
-                          suggested_hook: newHook,
-                          context_status: ctx.context_status,
-                          review_status: anyFailed
-                            ? 'Needs review'
-                            : 'Needs review',
-                          deterministic_checks: ctx.deterministic_checks,
-                          advisory_checks: ctx.advisory_checks,
-                          active_rules_applied: generationRules.map(
-                            (r) => r.rule_id
-                          ),
-                          rule_test_results: igTests,
-                          generation_source: generationSource,
-                          risk_flags: [
-                            ...(anyFailed ? ['Failed deterministic post-generation rule test — review required'] : []),
-                            ...(hasAdvisories ? ['AI advisory outcome — human review required'] : []),
-                          ],
-                          platform_copy: {
-                            instagram_reels: {
-                              ...c.platform_copy.instagram_reels,
-                              hook: newHook,
-                              caption: newIgCaption,
-                              rule_tests: igTests,
-                              updated_at: now,
-                            },
-                            youtube_shorts: {
-                              ...c.platform_copy.youtube_shorts,
-                              hook: newYtHook,
-                              caption: newYtCaption,
-                              rule_tests: ytTests,
-                              updated_at: now,
-                            },
-                          },
-                          revisions: [
-                            {
-                              revision_id: `rev-${Date.now().toString(36)}`,
-                              timestamp: now,
-                              summary:
-                                data.summary ||
-                                `Regenerated with ${generationRules.length} active rule(s).`,
-                              previous_hook: c.suggested_hook,
-                              new_hook: newHook,
-                              previous_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
-                              new_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
-                            },
-                            ...c.revisions,
-                          ],
-                        }
-                      : c
-                  ),
-                }
-              : p
-          ),
+          projects: prev.projects.map((p) => {
+            if (p.project_id !== params.projectId) return p;
+            const updatedCandidates = p.candidates.map((c) =>
+              c.candidate_id === params.candidateId
+                ? {
+                    ...c,
+                    suggested_hook: newHook,
+                    context_status: ctx.context_status,
+                    review_status: 'Needs review' as const,
+                    deterministic_checks: ctx.deterministic_checks,
+                    advisory_checks: ctx.advisory_checks,
+                    active_rules_applied: generationRules.map((r) => r.rule_id),
+                    rule_test_results: igTests,
+                    generation_source: generationSource,
+                    risk_flags: [
+                      ...(anyFailed ? ['Failed deterministic post-generation rule test — review required'] : []),
+                      ...(hasAdvisories ? ['AI advisory outcome — human review required'] : []),
+                    ],
+                    platform_copy: {
+                      instagram_reels: {
+                        ...c.platform_copy.instagram_reels,
+                        hook: newHook,
+                        caption: newIgCaption,
+                        rule_tests: igTests,
+                        updated_at: now,
+                      },
+                      youtube_shorts: {
+                        ...c.platform_copy.youtube_shorts,
+                        hook: newYtHook,
+                        caption: newYtCaption,
+                        rule_tests: ytTests,
+                        updated_at: now,
+                      },
+                    },
+                    revisions: [
+                      {
+                        revision_id: `rev-${Date.now().toString(36)}`,
+                        timestamp: now,
+                        summary: data.summary || `Regenerated with ${generationRules.length} active rule(s).`,
+                        previous_hook: c.suggested_hook,
+                        new_hook: newHook,
+                        previous_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
+                        new_segment_range: `${c.start_segment_id}–${c.end_segment_id}`,
+                      },
+                      ...c.revisions,
+                    ],
+                  }
+                : c
+            );
+            const allCandidatesVerified =
+              updatedCandidates.length > 0 &&
+              generationRules.length > 0 &&
+              updatedCandidates.every((candidate) =>
+                instagramRules.every((rule) =>
+                  candidate.platform_copy.instagram_reels.rule_tests.some(
+                    (test) => test.rule_id === rule.rule_id && test.outcome === 'Pass'
+                  )
+                ) &&
+                youtubeRules.every((rule) =>
+                  candidate.platform_copy.youtube_shorts.rule_tests.some(
+                    (test) => test.rule_id === rule.rule_id && test.outcome === 'Pass'
+                  )
+                )
+              );
+            return {
+              ...p,
+              updated_at: now,
+              status: allCandidatesVerified ? 'Rules verified' : 'In review',
+              candidates: updatedCandidates,
+            };
+          }),
           auditEvents: [
             {
               event_id: `aud-${Date.now().toString(36)}`,
@@ -899,7 +908,9 @@ export const LoopframeProvider: React.FC<{ children: React.ReactNode }> = ({
               event_type: 'rule_tested',
               description: anyFailed
                 ? `Post-generation deterministic test FAILED on ${params.candidateId}. Preference was NOT marked as compliant.`
-                : `Regenerated ${params.candidateId} with ${generationRules.length} rule(s); all deterministic tests passed.`,
+                : hasAdvisories
+                  ? `Regenerated ${params.candidateId}; advisory checks still require human review.`
+                  : `Regenerated ${params.candidateId} with ${generationRules.length} rules; all checks passed for this candidate.`,
               project_id: params.projectId,
               candidate_id: params.candidateId,
             },
