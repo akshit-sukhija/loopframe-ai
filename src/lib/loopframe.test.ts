@@ -161,3 +161,39 @@ test('parseTimestampedTranscript preserves explicitly supplied segment end times
   assert.equal(result.segments[1].end_ms, 24000);
   assert.equal(result.segments[2].end_ms, 31000);
 });
+
+
+test('PRESERVE_QUALIFICATIONS requires source markers to be retained, not merely any generic word', () => {
+  const rule: PreferenceRule = {
+    rule_id: 'rule-qualification-test',
+    rule_type: 'PRESERVE_QUALIFICATIONS',
+    human_readable_description: 'Preserve source qualifications.',
+    scope: 'global',
+    scope_reference: 'all',
+    source_feedback_id: 'fb-qualification-test',
+    source_feedback_text: 'Preserve conditions and caveats.',
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    status: 'active',
+    confirmed_by_user: true,
+    rule_parameters: { requiredQualifications: ['only if', 'foundational'] },
+  };
+  const source = 'This method works only if learners first build foundational vocabulary.';
+
+  const omitted = runDeterministicRuleTest({
+    rule,
+    hook: 'Build foundational vocabulary to use this method.',
+    caption: 'Start with the core concepts.',
+    sourceExcerpt: source,
+  });
+  assert.equal(omitted.outcome, 'Fail');
+  assert.match(omitted.matched_phrase_or_reason, /only if/i);
+
+  const retained = runDeterministicRuleTest({
+    rule,
+    hook: 'This method works only if you build foundational vocabulary.',
+    caption: 'Start with the core concepts.',
+    sourceExcerpt: source,
+  });
+  assert.equal(retained.outcome, 'Pass');
+});
