@@ -1,0 +1,6 @@
+{
+  "name": "LOOPFRAME AI",
+  "description": "Clip review that remembers your corrections and shows its receipts. Source-grounded clip candidates, context integrity checks, editable preference ledger, and deterministic rule verification.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
