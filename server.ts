@@ -638,6 +638,12 @@ Creator feedback text: "${freeText}"`,
     );
     const sourceExcerpt = asm.valid ? asm.sourceExcerpt : candidate.source_excerpt;
 
+    const instagramRules = activeRules.filter(
+      (rule) => rule.scope !== 'platform' || rule.scope_reference === 'instagram_reels'
+    );
+    const youtubeRules = activeRules.filter(
+      (rule) => rule.scope !== 'platform' || rule.scope_reference === 'youtube_shorts'
+    );
     // If user explicitly tests the honest failure mode ("Test Failure Scenario")
     if (simulateRuleFailure) {
       const failingHook =
@@ -645,8 +651,14 @@ Creator feedback text: "${freeText}"`,
       const failingCaption =
         'Use this 10x secret hack to master complex systems effortlessly with 100% guaranteed recall.';
 
-      const ruleTests = evaluateAllRulesForOutput({
-        rules: activeRules,
+      const instagramRuleTests = evaluateAllRulesForOutput({
+        rules: instagramRules,
+        hook: failingHook,
+        caption: failingCaption,
+        sourceExcerpt,
+      });
+      const youtubeRuleTests = evaluateAllRulesForOutput({
+        rules: youtubeRules,
         hook: failingHook,
         caption: failingCaption,
         sourceExcerpt,
@@ -657,7 +669,9 @@ Creator feedback text: "${freeText}"`,
         instagramCaption: failingCaption,
         youtubeHook: failingHook,
         youtubeCaption: failingCaption,
-        ruleTests,
+        ruleTests: instagramRuleTests,
+        instagramRuleTests,
+        youtubeRuleTests,
         generationSource: 'DEMO FALLBACK' as GenerationSourceLabel,
         summary:
           'Simulated rule-violating output to verify honest deterministic failure reporting.',
@@ -675,12 +689,15 @@ Creator feedback text: "${freeText}"`,
     if (ai) {
       try {
         const lineBreak = String.fromCharCode(10);
-        const rulesList = activeRules
-          .map(
-            (r, idx) =>
-              `${idx + 1}. [${r.scope}:${r.scope_reference} | ${r.rule_type}] ${r.human_readable_description} (Parameters: ${JSON.stringify(r.rule_parameters)})`
-          )
-          .join(lineBreak);
+        const formatRules = (rules: PreferenceRule[]) =>
+          rules.length > 0
+            ? rules.map((rule, index) =>
+                `${index + 1}. [${rule.scope}:${rule.scope_reference} | ${rule.rule_type}] ${rule.human_readable_description} (Parameters: ${JSON.stringify(rule.rule_parameters)})`
+              ).join(lineBreak)
+            : 'No additional confirmed rules for this platform.';
+        const rulesList =
+          'INSTAGRAM REELS RULES:' + lineBreak + formatRules(instagramRules) +
+          lineBreak + lineBreak + 'YOUTUBE SHORTS RULES:' + lineBreak + formatRules(youtubeRules);
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
@@ -739,13 +756,6 @@ Requirements:
       generationSource = 'DEMO FALLBACK';
       // Deterministic fallback for the sample candidates or custom transcripts.
       // Platform-scoped preferences must never leak into the other platform's copy.
-      const instagramRules = activeRules.filter(
-        (rule) => rule.scope !== 'platform' || rule.scope_reference === 'instagram_reels'
-      );
-      const youtubeRules = activeRules.filter(
-        (rule) => rule.scope !== 'platform' || rule.scope_reference === 'youtube_shorts'
-      );
-
       if (candidate.candidate_id === 'cand-sample-01') {
         newHook =
           'Write Down Three Problem-Space Questions Before Memorizing Terminology';
@@ -804,10 +814,16 @@ Requirements:
       newYtHook = applyFallbackRules(newYtHook, youtubeRules);
     }
 
-    const ruleTests = evaluateAllRulesForOutput({
-      rules: activeRules,
+    const instagramRuleTests = evaluateAllRulesForOutput({
+      rules: instagramRules,
       hook: newHook,
       caption: newIgCaption,
+      sourceExcerpt,
+    });
+    const youtubeRuleTests = evaluateAllRulesForOutput({
+      rules: youtubeRules,
+      hook: newYtHook,
+      caption: newYtCaption,
       sourceExcerpt,
     });
 
@@ -816,7 +832,9 @@ Requirements:
       instagramCaption: newIgCaption,
       youtubeHook: newYtHook,
       youtubeCaption: newYtCaption,
-      ruleTests,
+      ruleTests: instagramRuleTests,
+      instagramRuleTests,
+      youtubeRuleTests,
       generationSource,
       summary: `Regenerated with ${activeRules.length} active confirmed rule(s) [${generationSource}].`,
     });
